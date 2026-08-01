@@ -637,14 +637,14 @@ function _localizeDisplayQuotes(root){
 }
 function renderMessage(md,text){const src=_stripUrlsFromRaw(String(text||''));if(window.marked){try{md.innerHTML=marked.parse(src,{breaks:true,gfm:true});_renderKatex(md);_localizeDisplayQuotes(md);return}catch(e){}}md.innerHTML='';src.split(/\n{2,}/).filter(x=>x.length).forEach(part=>{const p=document.createElement('p');p.textContent=part;md.append(p)});if(!md.childNodes.length)md.textContent='';_localizeDisplayQuotes(md)}
 async function refineThoughtSummary(summary,thinking){if(!thinking)return;setThoughtSummary(summary,thinking,'Thinking summary...');try{const r=await api('/api/thinking-summary',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({thinking})});if(!r.ok)throw Error();const data=await r.json();setThoughtSummary(summary,thinking,data.summary||'')}catch{setThoughtSummary(summary,thinking)}}
-function thoughtSummary(thinking){const summary=document.createElement('button');summary.className='thinking-summary show';setThoughtSummary(summary,thinking);refineThoughtSummary(summary,thinking);summary.onclick=()=>{$('thoughtContent').textContent=thinking;sheet('thought',true)};return summary}
+function thoughtSummary(thinking,refine=true){const summary=document.createElement('button');summary.className='thinking-summary show';setThoughtSummary(summary,thinking);if(refine)refineThoughtSummary(summary,thinking);summary.onclick=()=>{$('thoughtContent').textContent=thinking;sheet('thought',true)};return summary}
 function _collectUrls(text,setBucket){if(!text)return;const re=/https?:\/\/[^\s)\]"<>`']+/g;let m;while((m=re.exec(text))){let u=m[0].replace(/[.,;:!?\)]+$/,'');setBucket.add(u)}}
 function _makeSourceChip(url){let dom;try{dom=new URL(url).hostname.replace(/^www\./,'')}catch(e){return null}const a=document.createElement('a');a.className='source-chip';a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.title=dom;const img=document.createElement('img');img.src='https://www.google.com/s2/favicons?domain='+encodeURIComponent(dom)+'&sz=64';img.alt='';img.referrerPolicy='no-referrer';img.onerror=function(){this.remove();a.textContent=dom.charAt(0).toUpperCase()};a.append(img);return a}
 function _showSourcesSheet(urls){const t=$('thoughtSheet').querySelector('.sheet-title');if(t)t.textContent='Sources';const c=$('thoughtContent');c.innerHTML='';const list=document.createElement('div');list.style.cssText='display:flex;flex-direction:column';urls.forEach(u=>{let dom;try{dom=new URL(u).hostname.replace(/^www\./,'')}catch(e){return}const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';a.style.cssText='display:flex;align-items:center;gap:12px;padding:14px 4px;border-bottom:1px solid var(--border);text-decoration:none;color:var(--text-primary)';const fav=document.createElement('img');fav.src='https://www.google.com/s2/favicons?domain='+encodeURIComponent(dom)+'&sz=64';fav.style.cssText='width:20px;height:20px;flex:0 0 auto;border-radius:50%';fav.referrerPolicy='no-referrer';const txt=document.createElement('span');txt.style.cssText='flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px';txt.textContent=dom;a.append(fav,txt);list.append(a)});c.append(list);sheet('thought',true)}
 function _maybeCompletionEgg(){if(Math.random()>=0.001)return;const svg=_CLAWD_EGG_POOL[Math.floor(Math.random()*_CLAWD_EGG_POOL.length)];const wrap=document.createElement('div');wrap.className='completion-egg';wrap.innerHTML=svg;wrap.addEventListener('click',()=>wrap.remove());document.body.appendChild(wrap);setTimeout(()=>wrap.classList.add('fade-out'),3200);setTimeout(()=>wrap.remove(),3900)}
 function _renderSources(row,urlSet){if(!urlSet||!urlSet.size)return;const urls=[...urlSet];const box=document.createElement('div');box.className='sources';const lbl=document.createElement('span');lbl.className='sources-label';lbl.textContent='Sources';box.append(lbl);const MAX=2;urls.slice(0,MAX).forEach(u=>{const c=_makeSourceChip(u);if(c)box.append(c)});const hidden=urls.slice(MAX);if(hidden.length){const more=document.createElement('button');more.type='button';more.className='source-more';more.textContent='+'+hidden.length;more.addEventListener('click',()=>_showSourcesSheet(urls));box.append(more)}const mds=row.querySelectorAll('.md'),md=mds[mds.length-1];if(md)md.after(box);else row.append(box)}
 function _buildTraceRow(){const row=document.createElement('div');row.className='trace-row';row.dataset.phases='[]';const summary=document.createElement('div');summary.className='trace-row-summary';const icon=document.createElement('span');icon.className='trace-row-icon';const text=document.createElement('span');text.className='trace-row-text';const status=document.createElement('span');status.className='trace-row-status';const chevron=document.createElement('span');chevron.className='trace-row-chevron';chevron.innerHTML=_TRACE_CHEVRON_SVG;summary.append(icon,text,status,chevron);row.append(summary);summary.addEventListener('click',()=>openTraceSheet(row));return row}
-function _buildTraceRowFromHistory(traces,thinking){if(!traces||!traces.length)return null;const phases=[];const toolMap={};traces.forEach(t=>{if(t.type==='tool_use'){const prev=typeof t.input==='string'?t.input:JSON.stringify(t.input||{});phases.push({id:t.id,type:'tool',status:'running',toolUseId:t.id,toolName:t.name||'Tool',toolInput:t.input,title:(t.name||'Tool')+(prev?' · '+prev.replace(/\s+/g,' ').slice(0,80):'')});toolMap[t.id]=phases[phases.length-1]}else if(t.type==='tool_result'&&toolMap[t.tool_use_id]){const p=toolMap[t.tool_use_id];p.status=t.is_error?'error':'completed';p.toolOutput=t.content||''}});if(!phases.length)return null;if(thinking){const sum=thoughtPreview(thinking);phases.unshift({id:'p_hist',type:'thinking',status:'completed',processText:thinking,summary:sum,title:sum})}phases.forEach(p=>{if(p.status==='running')p.status='completed'});const row=_buildTraceRow();_setPhases(row,phases);_renderTraceRowActive(row);_maybeFetchThinkingSummary(row);return row}
+function _buildTraceRowFromHistory(traces,thinking,refine=true){if(!traces||!traces.length)return null;const phases=[];const toolMap={};traces.forEach(t=>{if(t.type==='tool_use'){const prev=typeof t.input==='string'?t.input:JSON.stringify(t.input||{});phases.push({id:t.id,type:'tool',status:'running',toolUseId:t.id,toolName:t.name||'Tool',toolInput:t.input,title:(t.name||'Tool')+(prev?' · '+prev.replace(/\s+/g,' ').slice(0,80):'')});toolMap[t.id]=phases[phases.length-1]}else if(t.type==='tool_result'&&toolMap[t.tool_use_id]){const p=toolMap[t.tool_use_id];p.status=t.is_error?'error':'completed';p.toolOutput=t.content||''}});if(!phases.length)return null;if(thinking){const sum=thoughtPreview(thinking);phases.unshift({id:'p_hist',type:'thinking',status:'completed',processText:thinking,summary:sum,title:sum})}phases.forEach(p=>{if(p.status==='running')p.status='completed'});const row=_buildTraceRow();_setPhases(row,phases);_renderTraceRowActive(row);if(refine)_maybeFetchThinkingSummary(row);return row}
 function _getPhases(row){try{return JSON.parse(row.dataset.phases||'[]')}catch(e){return[]}}
 function _setPhases(row,arr){row.dataset.phases=JSON.stringify(arr)}
 function _appendOrUpdateThinkingPhase(row,deltaText){const phases=_getPhases(row);const last=phases[phases.length-1];if(last&&last.type==='thinking'&&last.status==='running'){last.processText=(last.processText||'')+deltaText;last.summary=thoughtPreview(last.processText);last.title=last.summary}else{if(last&&last.status==='running')last.status='completed';const sum=thoughtPreview(deltaText);phases.push({id:'p_'+Date.now().toString(36)+Math.random().toString(36).slice(2,5),type:'thinking',status:'running',processText:deltaText,summary:sum,title:sum})}_setPhases(row,phases)}
@@ -1253,19 +1253,19 @@ function _groupToolTracesByTextOffset(toolTraces,text){
   });
   return [...groups.entries()].sort((a,b)=>a[0]-b[0]);
 }
-function _buildClaudeRow(text,userText='',thinking='',timestamp='',userAttachments=[],traces=[],messageId=''){
+function _buildClaudeRow(text,userText='',thinking='',timestamp='',userAttachments=[],traces=[],messageId='',refine=true){
   const row=document.createElement('div');row.className='msg-claude';row.dataset.raw=text;row.dataset.timestamp=timestamp||'';if(messageId)row.dataset.msgId=messageId;
   const sumEntry=(traces||[]).find(t=>t.type==='summary'),toolTraces=(traces||[]).filter(t=>t.type!=='summary');
   const positioned=toolTraces.some(t=>Number.isFinite(Number(t.text_offset)));
   const grouped=toolTraces.length&&positioned?_groupToolTracesByTextOffset(toolTraces,text):[];
   const firstToolOffset=grouped.length?grouped[0][0]:0;
   const mergeLeadingThinking=!!(thinking&&toolTraces.length&&(!positioned||!_sliceChars(text,0,firstToolOffset).trim()));
-  if(thinking&&!mergeLeadingThinking)row.append(thoughtSummary(thinking));
+  if(thinking&&!mergeLeadingThinking)row.append(thoughtSummary(thinking,refine));
   if(toolTraces.length&&positioned){
     let cursor=0,usedSummary=false;
     grouped.forEach(([off,items],idx)=>{
       _appendMdSegment(row,_sliceChars(text,cursor,off));
-      const tr=_buildTraceRowFromHistory(items,mergeLeadingThinking&&idx===0?thinking:'');
+      const tr=_buildTraceRowFromHistory(items,mergeLeadingThinking&&idx===0?thinking:'',refine);
       if(tr){
         if(sumEntry&&!thinking&&!usedSummary){tr.style.display='none';row.append(_toolSummaryButton(sumEntry.text,tr));usedSummary=true}
         row.append(tr);
@@ -1274,8 +1274,8 @@ function _buildClaudeRow(text,userText='',thinking='',timestamp='',userAttachmen
     });
     _appendMdSegment(row,_sliceChars(text,cursor));
   }else if(toolTraces.length){
-    if(sumEntry&&!thinking){const tr=_buildTraceRowFromHistory(toolTraces,'');if(tr){tr.style.display='none';row.append(tr);row.append(_toolSummaryButton(sumEntry.text,tr))}}
-    else{const tr=_buildTraceRowFromHistory(toolTraces,mergeLeadingThinking?thinking:'');if(tr)row.append(tr)}
+    if(sumEntry&&!thinking){const tr=_buildTraceRowFromHistory(toolTraces,'',refine);if(tr){tr.style.display='none';row.append(tr);row.append(_toolSummaryButton(sumEntry.text,tr))}}
+    else{const tr=_buildTraceRowFromHistory(toolTraces,mergeLeadingThinking?thinking:'',refine);if(tr)row.append(tr)}
     _appendMdSegment(row,text);
   }else{
     _appendMdSegment(row,text);
@@ -1871,7 +1871,7 @@ function _renderMessagesIntoFragment(slice){
   slice.forEach(m=>{
     const row=m.role==='user'
       ?_buildUserRow(m.text,m.timestamp,m._la||[],m.id)
-      :_buildClaudeRow(m.text,m._lu||'',m.thinking,m.timestamp,m._la||[],m.traces||[],m.id);
+      :_buildClaudeRow(m.text,m._lu||'',m.thinking,m.timestamp,m._la||[],m.traces||[],m.id,false);
     frag.appendChild(row);
   });
   return frag;
