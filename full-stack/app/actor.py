@@ -109,7 +109,17 @@ class ConvActor:
 
     async def _ensure_client(self, request: TurnRequest) -> None:
         if self._client is not None and self._fingerprint == request.fingerprint:
+            logger.info("[%s] reusing warm client (fingerprint unchanged)", self.conv_id[:8])
             return
+        if self._client is not None:
+            logger.warning(
+                "[%s] fingerprint changed → reconnecting (old=%s new=%s)",
+                self.conv_id[:8],
+                (self._fingerprint or "")[:16],
+                request.fingerprint[:16],
+            )
+        else:
+            logger.info("[%s] cold start, creating client", self.conv_id[:8])
         await self._disconnect()
         client = ClaudeSDKClient(request.options)
         await client.connect()
@@ -127,6 +137,7 @@ class ConvActor:
         first_text_token_seen = False
         got_streaming_text = False
         result_seen = False
+        tool_calls = 0
         async for sdk_message in self._client.receive_response():
             if not first_sdk_event_seen:
                 first_sdk_event_seen = True
@@ -165,6 +176,8 @@ class ConvActor:
                         if text:
                             await request.outbox.put({"event": "delta", "text": text})
                     elif isinstance(block, _ToolUseBlock):
+                        tool_calls += 1
+                        logger.info("[%s] tool_use #%d: %s", self.conv_id[:8], tool_calls, block.name)
                         await request.outbox.put({
                             "event": "tool_use",
                             "id": block.id,
@@ -186,6 +199,10 @@ class ConvActor:
                         })
             elif isinstance(sdk_message, ResultMessage):
                 result_seen = True
+                logger.info(
+                    "[%s] turn done: %d tool calls, session=%s",
+                    self.conv_id[:8], tool_calls, (sdk_message.session_id or "")[:20],
+                )
                 await request.outbox.put(
                     {"event": "done", "session_id": sdk_message.session_id}
                 )
