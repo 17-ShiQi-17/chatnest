@@ -128,7 +128,7 @@ def thinking_options(
     return {"type": "disabled"}, selected
 
 
-async def build_system_prompt(message: str, model: str) -> str:
+def build_system_prompt(model: str) -> str:
     profile_context = build_profile_context().strip()
     memory = "" if profile_context else read_memory().strip()
     system_prompt = f"You are running as model {model}. If asked which model you are, answer with that identifier.\n\n{SYSTEM_PROMPT}"
@@ -141,14 +141,19 @@ async def build_system_prompt(message: str, model: str) -> str:
         )
     if memory:
         system_prompt += f"\n\n以下是用户明确保存的长期记忆：\n{memory}"
-    memory_hits = await fetch_memory_hits(message)
-    if memory_hits:
-        system_prompt += (
-            "\n\n以下是从记忆书架向量检索到的相关条目（可能相关也可能没用，"
-            "自己判断是否引用；不要照搬，更不要逐字复读）：\n"
-            f"{memory_hits}"
-        )
     return system_prompt
+
+
+async def _enrich_message(message: str) -> str:
+    memory_hits = await fetch_memory_hits(message)
+    if not memory_hits:
+        return message
+    prefix = (
+        "[以下是从记忆书架检索到的相关条目，可能相关也可能没用，"
+        "自己判断是否引用；不要照搬，更不要逐字复读：\n"
+        f"{memory_hits}]\n\n"
+    )
+    return prefix + message
 
 
 async def stream_chat(
@@ -170,14 +175,15 @@ async def stream_chat(
         raise SessionResumeError("会话恢复失败")
     thinking, selected_effort = thinking_options(model_config, effort, extended)
 
-    system_prompt = await build_system_prompt(message, model)
+    system_prompt = build_system_prompt(model)
+    enriched_message = await _enrich_message(message)
 
     option_values = dict(
         model=model,
         system_prompt=system_prompt,
         allowed_tools=["Read", "Grep", "Glob", "Write", "Edit", "Bash", "WebSearch", "WebFetch", "TodoWrite"],
         can_use_tool=memory_tool_permission,
-        max_turns=8,
+        max_turns=3,
         include_partial_messages=True,
         thinking=thinking,
         resume=session_id,
@@ -202,7 +208,7 @@ async def stream_chat(
 
     outbox = await get_registry().submit(
         conv_id,
-        message,
+        enriched_message,
         options,
         fingerprint,
         timing_callback,
